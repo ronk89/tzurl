@@ -1,0 +1,49 @@
+name: Generate zoneinfo
+
+on:
+  workflow_dispatch:
+    inputs:
+      tzdb_version:
+        description: IANA tzdata release, e.g. 2026e
+        required: true
+        default: 2026e
+      product_id:
+        description: Optional PRODID override (leave blank for the tzurl.org default)
+        required: false
+        default: ''
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    env:
+      TZDB_VERSION: ${{ inputs.tzdb_version }}
+      PRODUCT_ID_OVERRIDE: ${{ inputs.product_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y lzip libglib2.0-dev pkg-config
+
+      - name: Generate
+        run: |
+          args=("TZDB_VERSION=$TZDB_VERSION")
+          if [ -n "$PRODUCT_ID_OVERRIDE" ]; then args+=("PRODUCT_ID=$PRODUCT_ID_OVERRIDE"); fi
+          make "${args[@]}" tzdata tzrearguard vzicbuild zoneinfo
+
+      - name: Check output
+        run: |
+          for d in https/zoneinfo https/zoneinfo-outlook; do
+            n=$(find "$d" -name '*.ics' | wc -l)
+            echo "$d: $n files"
+            [ "$n" -gt 0 ] || exit 1
+          done
+          grep -h '^PRODID:' https/zoneinfo/America/Vancouver.ics https/zoneinfo-outlook/America/Vancouver.ics
+          echo "Vancouver outlook STANDARD blocks: $(grep -c '^BEGIN:STANDARD' https/zoneinfo-outlook/America/Vancouver.ics)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zoneinfo-${{ inputs.tzdb_version }}
+          path: |
+            https/zoneinfo
+            https/zoneinfo-outlook
+          retention-days: 30
